@@ -39,6 +39,8 @@
 
 /* Minimum size is two int32s version/number of calls */
 #define MIN_DATA_CALL_LIST_SIZE 8
+/* Default call interface */
+#define DEFAULT_CALL_INTERFACE "rmnet0"
 
 static gint data_call_compare(gconstpointer a, gconstpointer b)
 {
@@ -59,11 +61,16 @@ static void free_data_call(gpointer data, gpointer user_data)
 	struct data_call *call = data;
 
 	if (call) {
-		g_free(call->type);
-		g_free(call->ifname);
-		g_free(call->addresses);
-		g_free(call->dnses);
-		g_free(call->gateways);
+		if (call->type)
+			g_free(call->type);
+		if (call->ifname)
+			g_free(call->ifname);
+		if (call->addresses)
+			g_free(call->addresses);
+		if (call->dnses)
+			g_free(call->dnses);
+		if (call->gateways)
+			g_free(call->gateways);
 		g_free(call);
 	}
 }
@@ -138,6 +145,7 @@ struct unsol_data_call_list *g_ril_unsol_parse_data_call_list(GRil *gril,
 	struct unsol_data_call_list *reply =
 		g_new0(struct unsol_data_call_list, 1);
 	int i;
+	char *apn;
 
 	DBG("");
 
@@ -166,40 +174,73 @@ struct unsol_data_call_list *g_ril_unsol_parse_data_call_list(GRil *gril,
 				"(version=%d,num=%d",
 				reply->version,
 				reply->num);
-
-	for (i = 0; i < reply->num; i++) {
+	
+	if (reply->version < 5) {
+		/* in version 4 there will not be more then one valid call response */
 		call = g_new0(struct data_call, 1);
+                call->cid = parcel_r_int32(&rilp);
+                call->active = parcel_r_int32(&rilp);
+                call->type = parcel_r_string(&rilp);
+		if (reply->version < 4)
+			apn = parcel_r_string(&rilp); // apn not used
+                call->addresses = parcel_r_string(&rilp);
+		/* we need an interface but don't get one in V4 so use the default */
+		call->ifname = g_strdup(DEFAULT_CALL_INTERFACE);
 
-		call->status = parcel_r_int32(&rilp);
-		call->retry = parcel_r_int32(&rilp);
-		call->cid = parcel_r_int32(&rilp);
-		call->active = parcel_r_int32(&rilp);
+                g_ril_append_print_buf(gril,
+                                        "%s [status=%d,retry=%d,cid=%d,"
+                                        "active=%d,type=%s,ifname=%s,"
+                                        "address=%s,dns=%s,gateways=%s]",
+                                        print_buf,
+                                        call->status,
+                                        call->retry,
+                                        call->cid,
+                                        call->active,
+                                        call->type,
+                                        call->ifname,
+                                        call->addresses,
+                                        call->dnses,
+                                        call->gateways);
 
-		call->type = parcel_r_string(&rilp);
-		call->ifname = parcel_r_string(&rilp);
-		call->addresses = parcel_r_string(&rilp);
-		call->dnses = parcel_r_string(&rilp);
-		call->gateways = parcel_r_string(&rilp);
+                reply->call_list =
+                        g_slist_insert_sorted(reply->call_list,
+                                                call,
+                                                data_call_compare);
+	} else {	
+		for (i = 0; i < reply->num; i++) {
+			call = g_new0(struct data_call, 1);
+	
+			call->status = parcel_r_int32(&rilp);
+			call->retry = parcel_r_int32(&rilp);
+			call->cid = parcel_r_int32(&rilp);
+			call->active = parcel_r_int32(&rilp);
+	
+			call->type = parcel_r_string(&rilp);
+			call->ifname = parcel_r_string(&rilp);
+			call->addresses = parcel_r_string(&rilp);
+			call->dnses = parcel_r_string(&rilp);
+			call->gateways = parcel_r_string(&rilp);
+	
+			g_ril_append_print_buf(gril,
+						"%s [status=%d,retry=%d,cid=%d,"
+						"active=%d,type=%s,ifname=%s,"
+						"address=%s,dns=%s,gateways=%s]",
+						print_buf,
+						call->status,
+						call->retry,
+						call->cid,
+						call->active,
+						call->type,
+						call->ifname,
+						call->addresses,
+						call->dnses,
+						call->gateways);
 
-		g_ril_append_print_buf(gril,
-					"%s [status=%d,retry=%d,cid=%d,"
-					"active=%d,type=%s,ifname=%s,"
-					"address=%s,dns=%s,gateways=%s]",
-					print_buf,
-					call->status,
-					call->retry,
-					call->cid,
-					call->active,
-					call->type,
-					call->ifname,
-					call->addresses,
-					call->dnses,
-					call->gateways);
-
-		reply->call_list =
-			g_slist_insert_sorted(reply->call_list,
-						call,
-						data_call_compare);
+			reply->call_list =
+				g_slist_insert_sorted(reply->call_list,
+							call,
+							data_call_compare);
+		}
 	}
 
 	g_ril_append_print_buf(gril, "%s}", print_buf);

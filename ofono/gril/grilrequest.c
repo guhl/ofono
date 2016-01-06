@@ -50,7 +50,9 @@
 #define DATA_PROFILE_OEM_BASE_STR "1000"
 
 /* SETUP_DATA_CALL_PARAMS reply parameters */
-#define MIN_DATA_CALL_REPLY_SIZE 36
+//#define MIN_DATA_CALL_REPLY_SIZE 36
+// to support ril V4 the minimum size is 30
+#define MIN_DATA_CALL_REPLY_SIZE 30
 
 /*
  * TODO:

@@ -205,6 +205,16 @@ static void ril_gprs_context_call_list_changed(struct ril_msg *message,
 		 * Every context receives notifications about all data calls
 		 * but should only handle its own.
 		 */
+		/* The original test assumes that gcd->active_rild_cid is set before
+ 		 * the call list change is reported. This is not necessaraly true.
+ 		 * Set the gcd->active_rild_cid to the call-cid if 
+ 		 * the active_rild_cid -1 and the call-cid is valid
+ 		*/
+		if (gcd->active_rild_cid = -1 && call->cid > 0 && call->cid < 1000)
+			gcd->active_rild_cid = call->cid;
+		else
+			continue;
+
 		if (call->cid != gcd->active_rild_cid)
 			continue;
 
@@ -368,6 +378,7 @@ static void ril_setup_data_call_cb(struct ril_msg *message, gpointer user_data)
 	char** dns_addr = NULL;
 	char** dns_ipv6_addr = NULL;
 
+	ofono_info("Guhl: ril_setup_data_call_cb was called");
 	ofono_info("setting up data call");
 
 	if (message->error != RIL_E_SUCCESS) {
@@ -382,6 +393,7 @@ static void ril_setup_data_call_cb(struct ril_msg *message, gpointer user_data)
 	}
 
 	reply = g_ril_reply_parse_data_call(gcd->ril, message, &error);
+	ofono_info("Guhl: ril_setup_data_call_cb reply->cid=%d", reply->cid);
 
 	gcd->active_rild_cid = reply->cid;
 
@@ -420,9 +432,11 @@ static void ril_setup_data_call_cb(struct ril_msg *message, gpointer user_data)
 
 	ofono_gprs_context_set_interface(gc, reply->ifname);
 
-	ril_gprs_split_gw_by_protocol(reply->gateways, &ip_gw, &ipv6_gw);
+	if (reply->gateways)
+		ril_gprs_split_gw_by_protocol(reply->gateways, &ip_gw, &ipv6_gw);
 
-	ril_gprs_split_dns_by_protocol(reply->dns_addresses, &dns_addr,
+	if (reply->dns_addresses)
+		ril_gprs_split_dns_by_protocol(reply->dns_addresses, &dns_addr,
 								&dns_ipv6_addr);
 
 	/* TODO:
@@ -438,8 +452,10 @@ static void ril_setup_data_call_cb(struct ril_msg *message, gpointer user_data)
 			reply->protocol == OFONO_GPRS_PROTO_IPV4V6)) {
 
 		ofono_gprs_context_set_ipv6_address(gc, split_ipv6_addr[0]);
-		ofono_gprs_context_set_ipv6_gateway(gc, ipv6_gw);
-		ofono_gprs_context_set_ipv6_dns_servers(gc,
+		if (reply->gateways)
+			ofono_gprs_context_set_ipv6_gateway(gc, ipv6_gw);
+		if (reply->dns_addresses)
+			ofono_gprs_context_set_ipv6_dns_servers(gc,
 						(const char **) dns_ipv6_addr);
 	}
 
@@ -449,8 +465,10 @@ static void ril_setup_data_call_cb(struct ril_msg *message, gpointer user_data)
 		ofono_gprs_context_set_ipv4_netmask(gc,
 					ril_util_get_netmask(ip_addr));
 		ofono_gprs_context_set_ipv4_address(gc, split_ip_addr[0], TRUE);
-		ofono_gprs_context_set_ipv4_gateway(gc, ip_gw);
-		ofono_gprs_context_set_ipv4_dns_servers(gc,
+		if (reply->gateways)
+			ofono_gprs_context_set_ipv4_gateway(gc, ip_gw);
+		if (reply->dns_addresses)
+			ofono_gprs_context_set_ipv4_dns_servers(gc,
 						(const char **) dns_addr);
 	}
 error:
@@ -493,7 +511,8 @@ static void ril_gprs_context_activate_primary(struct ofono_gprs_context *gc,
 	cbd->user = gc;
 
 	/* TODO: implement radio technology selection. */
-	request.tech = RADIO_TECH_HSPA;
+	// request.tech = RADIO_TECH_HSPA;
+	request.tech = RADIO_TECH_GPRS;
 
 	/* TODO: add comments about tethering, other non-public
 	 * profiles...

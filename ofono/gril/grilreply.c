@@ -39,7 +39,11 @@
 #include "grilutil.h"
 
 /* SETUP_DATA_CALL_PARAMS reply params */
-#define MIN_DATA_CALL_REPLY_SIZE 36
+//#define MIN_DATA_CALL_REPLY_SIZE 36
+// to support ril V4 the minimum size is 30
+#define MIN_DATA_CALL_REPLY_SIZE 30
+#define DEFAULT_CALL_TYPE "IP"
+#define DEFAULT_CALL_DNSES "151.236.6.6 192.121.170.170"
 
 /* TODO: move this to grilutil.c */
 void g_ril_reply_free_setup_data_call(struct reply_setup_data_call *reply)
@@ -96,6 +100,11 @@ struct reply_setup_data_call *g_ril_reply_parse_data_call(GRil *gril,
 	 *
 	 * TODO: What if there's more than 1 call in the list??
 	 */
+	 /* 
+	 * The assumption that the num must not be > 1 only applies to V6 
+         * call responses. For V4 they define if there is additional info
+         * like dnses and gateways available 
+	 */
 
 	/*
 	 * TODO: consider using 'unused' variable; however if we
@@ -104,21 +113,41 @@ struct reply_setup_data_call *g_ril_reply_parse_data_call(GRil *gril,
 	 */
 	reply->version = parcel_r_int32(&rilp);
 	num = parcel_r_int32(&rilp);
-	if (num != 1) {
-		ofono_error("%s: too many calls: %d", __func__,	num);
-		OFONO_EINVAL(error);
-		goto error;
+	ofono_info("Guhl: %s: version=%d, num=%d", __func__, reply->version, num);
+	if (reply->version < 5) {
+		/* in Version 4 the num defines if dnses and gws are sent */
+		reply->cid = atoi(parcel_r_string(&rilp)); // CID string
+		reply->ifname = parcel_r_string(&rilp); // interface
+		raw_ip_addrs = parcel_r_string(&rilp); // ip
+		/* some hardcoded defaults */
+		type = g_strdup(DEFAULT_CALL_TYPE);
+		if (num >= 4) {
+			dnses = parcel_r_string(&rilp);
+			ofono_debug("Guhl: %s: got dnses=%s", __func__, dnses);
+		} else {
+			dnses = g_strdup(DEFAULT_CALL_DNSES);
+			ofono_debug("Guhl: %s: used default dnses=%s", __func__, dnses);
+		}
+		if (num >= 5) {
+			raw_gws = parcel_r_string(&rilp);
+			ofono_debug("Guhl: %s: got raw_gws=%s", __func__, raw_gws);
+		}
+	} else {
+		if (num != 1) {
+			ofono_error("%s: too many calls: %d", __func__,	num);
+			OFONO_EINVAL(error);
+			goto error;
+		}
+		reply->status = parcel_r_int32(&rilp);
+		reply->retry_time = parcel_r_int32(&rilp);
+		reply->cid = parcel_r_int32(&rilp);
+		reply->active = parcel_r_int32(&rilp);
+		type = parcel_r_string(&rilp);
+		reply->ifname = parcel_r_string(&rilp);
+		raw_ip_addrs = parcel_r_string(&rilp);
+		dnses = parcel_r_string(&rilp);
+		raw_gws = parcel_r_string(&rilp);
 	}
-
-	reply->status = parcel_r_int32(&rilp);
-	reply->retry_time = parcel_r_int32(&rilp);
-	reply->cid = parcel_r_int32(&rilp);
-	reply->active = parcel_r_int32(&rilp);
-	type = parcel_r_string(&rilp);
-	reply->ifname = parcel_r_string(&rilp);
-	raw_ip_addrs = parcel_r_string(&rilp);
-	dnses = parcel_r_string(&rilp);
-	raw_gws = parcel_r_string(&rilp);
 
 	g_ril_append_print_buf(gril,
 				"{version=%d,num=%d [status=%d,retry=%d,"
@@ -185,9 +214,13 @@ struct reply_setup_data_call *g_ril_reply_parse_data_call(GRil *gril,
 		reply->gateways = NULL;
 
 	if (reply->gateways == NULL || (sizeof(reply->gateways) == 0)) {
-		ofono_error("%s: no gateways: %s", __func__, raw_gws);
-		OFONO_EINVAL(error);
-		goto error;
+		if (reply->version < 5) {
+			ofono_info("%s: no gateways: %s", __func__, raw_gws);
+		} else {
+			ofono_error("%s: no gateways: %s", __func__, raw_gws);
+			OFONO_EINVAL(error);
+			goto error;
+		}
 	}
 
 	/* Split DNS addresses */
@@ -198,10 +231,13 @@ struct reply_setup_data_call *g_ril_reply_parse_data_call(GRil *gril,
 
 	if (reply->dns_addresses == NULL ||
 		(sizeof(reply->dns_addresses) == 0)) {
-		ofono_error("%s: no DNS: %s", __func__, dnses);
-
-		OFONO_EINVAL(error);
-		goto error;
+		if (reply->version < 5) {
+			ofono_info("%s: no DNS: %s", __func__, dnses);
+		} else {
+			ofono_error("%s: no DNS: %s", __func__, dnses);
+			OFONO_EINVAL(error);
+			goto error;
+		}
 	}
 
 error:
